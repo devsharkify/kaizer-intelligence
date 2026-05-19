@@ -156,6 +156,27 @@ body{background:var(--bg);color:var(--text);font-family:'DM Mono',monospace;min-
 .vlist-wrap{max-height:280px;overflow-y:auto;padding-right:2px}
 .vlist-wrap::-webkit-scrollbar{width:3px}
 .vlist-wrap::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+
+/* Custom date-range modal */
+.dr-overlay{position:fixed;inset:0;background:#000a;display:none;align-items:center;justify-content:center;z-index:500}
+.dr-overlay.show{display:flex}
+.dr-modal{background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:18px 20px;width:340px;box-shadow:0 10px 40px #0008;font-family:'DM Mono',monospace}
+.dr-title{font-family:'DM Sans',sans-serif;font-size:14px;font-weight:600;color:var(--text);letter-spacing:.5px;margin-bottom:14px;display:flex;align-items:center;justify-content:space-between}
+.dr-close{background:none;border:none;color:var(--muted);font-size:18px;cursor:pointer;padding:0 4px;line-height:1}
+.dr-close:hover{color:var(--red)}
+.dr-row{display:flex;flex-direction:column;gap:5px;margin-bottom:12px}
+.dr-lbl{font-size:10px;color:var(--muted);letter-spacing:1px;text-transform:uppercase}
+.dr-input{background:var(--bg);border:1px solid var(--border);color:var(--text);padding:8px 10px;border-radius:5px;font-family:'DM Mono',monospace;font-size:12px;color-scheme:dark}
+.dr-input:focus{outline:none;border-color:var(--blue)}
+.dr-presets{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:14px}
+.dr-preset{background:var(--bg3);border:1px solid var(--border);color:var(--muted);font-size:10px;padding:4px 8px;border-radius:4px;cursor:pointer;font-family:'DM Mono',monospace}
+.dr-preset:hover{border-color:var(--blue);color:var(--blue)}
+.dr-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:6px}
+.dr-btn{padding:7px 14px;border-radius:5px;font-family:'DM Mono',monospace;font-size:11px;cursor:pointer;border:1px solid var(--border);background:transparent;color:var(--text);letter-spacing:.5px}
+.dr-btn-apply{background:var(--blue);border-color:var(--blue);color:#fff;font-weight:600}
+.dr-btn-apply:hover{background:#2a8aef}
+.dr-btn:hover:not(.dr-btn-apply){border-color:var(--text)}
+.dr-error{color:var(--red);font-size:10px;margin-top:4px;min-height:12px}
 </style>
 </head>
 <body>
@@ -245,6 +266,39 @@ body{background:var(--bg);color:var(--text);font-family:'DM Mono',monospace;min-
   <div class="ptab" id="pt-3months" onclick="setPeriod('3months')">3 MONTHS</div>
   <div class="ptab" id="pt-6months" onclick="setPeriod('6months')">6 MONTHS</div>
   <div class="ptab" id="pt-1year" onclick="setPeriod('1year')">1 YEAR</div>
+  <div class="ptab" id="pt-custom" onclick="openCustomRange()" style="margin-left:auto">📅 CUSTOM</div>
+</div>
+
+<!-- Custom Date Range Modal -->
+<div class="dr-overlay" id="drOverlay" onclick="if(event.target===this)closeCustomRange()">
+  <div class="dr-modal">
+    <div class="dr-title">
+      <span>📅 Custom Date Range</span>
+      <button class="dr-close" onclick="closeCustomRange()" title="Close">×</button>
+    </div>
+    <div class="dr-presets">
+      <div class="dr-preset" onclick="drPreset(7)">Last 7d</div>
+      <div class="dr-preset" onclick="drPreset(14)">Last 14d</div>
+      <div class="dr-preset" onclick="drPreset(30)">Last 30d</div>
+      <div class="dr-preset" onclick="drPreset(60)">Last 60d</div>
+      <div class="dr-preset" onclick="drPreset(90)">Last 90d</div>
+      <div class="dr-preset" onclick="drPresetMonth(0)">This month</div>
+      <div class="dr-preset" onclick="drPresetMonth(1)">Last month</div>
+    </div>
+    <div class="dr-row">
+      <label class="dr-lbl" for="drFrom">From (IST)</label>
+      <input type="date" class="dr-input" id="drFrom">
+    </div>
+    <div class="dr-row">
+      <label class="dr-lbl" for="drTo">To (IST)</label>
+      <input type="date" class="dr-input" id="drTo">
+    </div>
+    <div class="dr-error" id="drError"></div>
+    <div class="dr-actions">
+      <button class="dr-btn" onclick="closeCustomRange()">Cancel</button>
+      <button class="dr-btn dr-btn-apply" onclick="applyCustomRange()">Apply</button>
+    </div>
+  </div>
 </div>
 
 <div id="mstats" class="mstats" style="display:none">
@@ -376,6 +430,7 @@ const CHANNELS = [
 // STATE
 // ════════════════════════════════════════
 let period = 'today';
+let customRange = { from: null, to: null }; // Date objects (UTC) when period==='custom'
 let agentResults = {}; // channelId -> {videos, stats, error}
 let subAgentResults = {}; // channelId -> analysis string
 let masterResult = '';
@@ -409,6 +464,9 @@ function getPeriodRange() {
   } else if (period === 'yesterday') {
     // Yesterday IST: 00:00:00 IST to 23:59:59 IST
     return { from: istMidnight(1), to: istEndOfDay(1) };
+  } else if (period === 'custom' && customRange.from && customRange.to) {
+    // Custom: from 00:00 IST on `from` date to 23:59:59 IST on `to` date
+    return { from: customRange.from, to: customRange.to };
   } else {
     // Last 7 days: 7 days ago 00:00 IST to now
     if (period === '3days')   return { from: istMidnight(3),   to: new Date() };
@@ -419,6 +477,38 @@ function getPeriodRange() {
   if (period === '1year')   return { from: istMidnight(365), to: new Date() };
   return { from: istMidnight(7), to: new Date() };
   }
+}
+
+// Convert "YYYY-MM-DD" (interpreted as IST midnight) to UTC Date
+function istDateStrToUTC(dateStr, endOfDay = false) {
+  // dateStr = "YYYY-MM-DD" => treat as IST 00:00 (or 23:59:59.999)
+  const [y, m, d] = dateStr.split('-').map(Number);
+  // Build UTC ms for IST midnight: IST midnight = UTC of (Y-M-D 00:00) minus IST offset
+  const istMs = Date.UTC(y, m - 1, d, 0, 0, 0, 0);
+  let utc = istMs - IST_OFFSET;
+  if (endOfDay) utc += 86400000 - 1;
+  return new Date(utc);
+}
+
+// Convert UTC Date back to "YYYY-MM-DD" in IST (for input prefill)
+function utcToISTDateStr(d) {
+  if (!d) return '';
+  const ist = new Date(d.getTime() + IST_OFFSET);
+  return ist.toISOString().substring(0, 10);
+}
+
+// One source of truth for human period labels (lower-case form)
+function periodLabelLower() {
+  if (period === 'custom' && customRange.from && customRange.to) {
+    return `${utcToISTDateStr(customRange.from)} → ${utcToISTDateStr(customRange.to)}`;
+  }
+  return period==='today'?'today':period==='yesterday'?'yesterday':period==='3days'?'last 3 days':period==='15days'?'last 15 days':period==='30days'?'last 30 days':period==='3months'?'last 3 months':period==='6months'?'last 6 months':period==='1year'?'last 1 year':'last 7 days';
+}
+function periodLabelTitle() {
+  if (period === 'custom' && customRange.from && customRange.to) {
+    return `${utcToISTDateStr(customRange.from)} → ${utcToISTDateStr(customRange.to)}`;
+  }
+  return period==='today'?'Today '+new Date().toLocaleDateString('en-IN'):period==='yesterday'?'Yesterday':period==='3days'?'Last 3 Days':period==='15days'?'Last 15 Days':period==='30days'?'Last 30 Days':period==='3months'?'Last 3 Months':period==='6months'?'Last 6 Months':period==='1year'?'Last 1 Year':'Last 7 Days';
 }
 
 function fIST(utcStr) {
@@ -827,7 +917,7 @@ async function runSubAgent(i) {
   if (b.style.display === 'none') toggleSubAgent(i);
   renderSubAgentContent(i, '', true);
 
-  const periodLabel = period==='today'?'today':period==='yesterday'?'yesterday':period==='3days'?'last 3 days':period==='15days'?'last 15 days':period==='30days'?'last 30 days':period==='3months'?'last 3 months':period==='6months'?'last 6 months':period==='1year'?'last 1 year':'last 7 days';
+  const periodLabel = periodLabelLower();
   const videos = result.videos;
   const shorts = videos.filter(v => v.short);
   const longs = videos.filter(v => !v.short);
@@ -892,7 +982,7 @@ async function runMasterAgent() {
     <div style="margin-top:6px"><div class="dot-pulse" style="justify-content:center"><span></span><span></span><span></span></div></div>
   </div>`;
 
-  const periodLabel = period==='today'?'today':period==='yesterday'?'yesterday':period==='3days'?'last 3 days':period==='15days'?'last 15 days':period==='30days'?'last 30 days':period==='3months'?'last 3 months':period==='6months'?'last 6 months':period==='1year'?'last 1 year':'last 7 days';
+  const periodLabel = periodLabelLower();
   const allChs = Object.values(agentResults);
   const totalVids = allChs.reduce((s,c) => s+c.videos.length, 0);
   const totalShorts = allChs.reduce((s,c) => s+c.videos.filter(v=>v.short).length, 0);
@@ -947,7 +1037,7 @@ async function runSEOAgent() {
     <div style="margin-top:6px"><div class="dot-pulse" style="justify-content:center"><span></span><span></span><span></span></div></div>
   </div>`;
 
-  const periodLabel = period==='today'?'today':period==='yesterday'?'yesterday':period==='3days'?'last 3 days':period==='15days'?'last 15 days':period==='30days'?'last 30 days':period==='3months'?'last 3 months':period==='6months'?'last 6 months':period==='1year'?'last 1 year':'last 7 days';
+  const periodLabel = periodLabelLower();
 
   // Build full SEO data — every video title, duration, views, upload time
   let seoData = `KAIZER TELUGU NEWS NETWORK — SEO AUDIT DATA (${periodLabel.toUpperCase()})\n\n`;
@@ -1122,16 +1212,85 @@ async function runAllAgents() { return runPhases(1,2,3,4); }
 // ════════════════════════════════════════
 // PERIOD SELECT
 // ════════════════════════════════════════
+const PERIOD_TABS = ['today','yesterday','week','3days','15days','30days','3months','6months','1year','custom'];
 function setPeriod(p) {
   period = p;
-  ['today','yesterday','week'].forEach(x => $id('pt-'+x).classList.toggle('active', x===p));
+  PERIOD_TABS.forEach(x => { const el = $id('pt-'+x); if (el) el.classList.toggle('active', x===p); });
+}
+
+// ── Custom range modal ──
+function openCustomRange() {
+  const overlay = $id('drOverlay');
+  const fromIn = $id('drFrom');
+  const toIn = $id('drTo');
+  const todayIst = utcToISTDateStr(new Date());
+  // Prefill: existing custom range, or last-7-days default
+  if (customRange.from && customRange.to) {
+    fromIn.value = utcToISTDateStr(customRange.from);
+    toIn.value = utcToISTDateStr(customRange.to);
+  } else {
+    const sevenAgo = new Date(Date.now() - 7 * 86400000);
+    fromIn.value = utcToISTDateStr(sevenAgo);
+    toIn.value = todayIst;
+  }
+  fromIn.max = todayIst;
+  toIn.max = todayIst;
+  $id('drError').textContent = '';
+  overlay.classList.add('show');
+  setTimeout(() => fromIn.focus(), 50);
+}
+
+function closeCustomRange() {
+  $id('drOverlay').classList.remove('show');
+}
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && $id('drOverlay') && $id('drOverlay').classList.contains('show')) {
+    closeCustomRange();
+  }
+});
+
+function drPreset(days) {
+  const today = new Date();
+  const from = new Date(today.getTime() - days * 86400000);
+  $id('drFrom').value = utcToISTDateStr(from);
+  $id('drTo').value = utcToISTDateStr(today);
+}
+
+function drPresetMonth(monthsAgo) {
+  // monthsAgo=0 => this month, 1 => last month (full)
+  const ist = nowIST();
+  const y = ist.getUTCFullYear();
+  const m = ist.getUTCMonth() - monthsAgo;
+  const first = new Date(Date.UTC(y, m, 1));
+  const last = monthsAgo === 0 ? ist : new Date(Date.UTC(y, m + 1, 0));
+  $id('drFrom').value = first.toISOString().substring(0, 10);
+  $id('drTo').value = last.toISOString().substring(0, 10);
+}
+
+function applyCustomRange() {
+  const fromStr = $id('drFrom').value;
+  const toStr = $id('drTo').value;
+  const err = $id('drError');
+  if (!fromStr || !toStr) { err.textContent = 'Please pick both From and To dates.'; return; }
+  const fromUTC = istDateStrToUTC(fromStr, false);
+  const toUTC   = istDateStrToUTC(toStr,   true);
+  if (fromUTC > toUTC) { err.textContent = 'From date must be on or before To date.'; return; }
+  const maxDays = 730;
+  if ((toUTC - fromUTC) / 86400000 > maxDays) { err.textContent = `Range too large (max ${maxDays} days).`; return; }
+  customRange = { from: fromUTC, to: toUTC };
+  // Update tab label so user sees the picked range
+  const tab = $id('pt-custom');
+  if (tab) tab.textContent = `📅 ${fromStr} → ${toStr}`;
+  setPeriod('custom');
+  closeCustomRange();
 }
 
 // ════════════════════════════════════════
 // TELEGRAM
 // ════════════════════════════════════════
 function buildTGReport() {
-  const periodLabel = period === 'today' ? 'Today '+new Date().toLocaleDateString('en-IN') : period === 'yesterday' ? 'Yesterday' : 'Last 7 Days';
+  const periodLabel = periodLabelTitle();
   const lines = [`🤖 <b>Kaizer Agent System — ${periodLabel}</b>`, `🕐 ${nowIST().toISOString().replace('T',' ').substring(0,16)} IST\n`];
   for (const ch of CHANNELS) {
     const r = agentResults[ch.id];
@@ -1206,7 +1365,7 @@ async function testAPI(){
 // PDF DOWNLOAD
 // ════════════════════════════════════════
 function downloadPDF() {
-  const period2 = period==='today'?'Today '+new Date().toLocaleDateString('en-IN'):period==='yesterday'?'Yesterday':period==='3days'?'Last 3 Days':period==='15days'?'Last 15 Days':period==='30days'?'Last 30 Days':period==='3months'?'Last 3 Months':period==='6months'?'Last 6 Months':period==='1year'?'Last 1 Year':'Last 7 Days';
+  const period2 = periodLabelTitle();
   const now = new Date(Date.now() + 5.5*3600000).toISOString().replace('T',' ').slice(0,16) + ' IST';
   const dateStr = new Date().toISOString().slice(0,10);
 
